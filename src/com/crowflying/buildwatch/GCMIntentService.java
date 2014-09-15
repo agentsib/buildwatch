@@ -30,6 +30,7 @@ import android.util.Log;
 import android.widget.Toast;
 
 import com.crowflying.buildwatch.jenkins.RegisterGCMTokenCommand;
+import com.crowflying.buildwatch.utils.IntentUtils;
 import com.google.analytics.tracking.android.EasyTracker;
 import com.google.analytics.tracking.android.Tracker;
 import com.google.android.gcm.GCMBaseIntentService;
@@ -154,6 +155,7 @@ public class GCMIntentService extends GCMBaseIntentService {
 	@Override
 	protected void onMessage(Context context, Intent gcm) {
 		// Format the string.
+        IntentUtils.printIntentExtras(gcm);
 		Intent jenkins = new Intent(context.getString(R.string.action_jenkins));
 		String message = gcm.getStringExtra(GCM_KEY_MESSAGE);
 		tracker.trackEvent("gcm", "message", "received", 0L);

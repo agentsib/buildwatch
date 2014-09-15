@@ -56,4 +56,7 @@
     <string name="extra_fullname">com.crowflying.buildwatch.EXTRA_USER</string>
     <string name="extra_build_url">com.crowflying.buildwatch.EXTRA_BUILD_URL</string>
 
+    <string name="extra_build_status">com.crowflying.buildwatch.EXTRA_BUILD_STATUS</string>
+    <string name="extra_build_name">com.crowflying.buildwatch.EXTRA_BUILD_NAME</string>
+
 </resources>

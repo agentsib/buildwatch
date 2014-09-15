@@ -21,7 +21,11 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.database.Cursor;
 import android.database.SQLException;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
+import android.os.AsyncTask;
+import android.os.Bundle;
 import android.preference.PreferenceManager;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationCompat.Builder;
@@ -30,6 +34,7 @@ import android.util.Log;
 import com.crowflying.buildwatch.ConfigurationActivity;
 import com.crowflying.buildwatch.MainActivity;
 import com.crowflying.buildwatch.R;
+import com.crowflying.buildwatch.jenkins.GetBuildInfoCommand;
 import com.crowflying.buildwatch.utils.IntentUtils;
 import com.google.analytics.tracking.android.EasyTracker;
 import com.google.analytics.tracking.android.Tracker;
@@ -39,6 +44,9 @@ import com.sonyericsson.extras.liveware.extension.util.ExtensionService;
 import com.sonyericsson.extras.liveware.extension.util.ExtensionUtils;
 import com.sonyericsson.extras.liveware.extension.util.notification.NotificationUtil;
 import com.sonyericsson.extras.liveware.extension.util.registration.RegistrationInformation;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 
 public class BuildWatchExtensionService extends ExtensionService {
 
@@ -64,13 +72,38 @@ public class BuildWatchExtensionService extends ExtensionService {
 	}
 
 	@Override
-	public int onStartCommand(Intent intent, int flags, int startId) {
+	public int onStartCommand(final Intent intent, int flags, int startId) {
 		Log.d(LOG_TAG, String.format("Got a jenkins watch command: %s", intent));
 		int retval = super.onStartCommand(intent, flags, startId);
 		if (intent != null
 				&& getString(R.string.action_jenkins)
 						.equals(intent.getAction())) {
-			sendMessage(intent);
+            new AsyncTask<Intent, Void, Bundle>() {
+
+                private Intent mIntent;
+
+                @Override
+                protected Bundle doInBackground(Intent... intents) {
+                    mIntent = intents[0];
+                    try {
+                        return new GetBuildInfoCommand(BuildWatchExtensionService.this, mIntent.getStringExtra(getString(R.string.extra_build_url))).execute();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                    return null;
+                }
+
+                @Override
+                protected void onPostExecute(Bundle bundle) {
+                    if (bundle != null) {
+                        mIntent.putExtra(getString(R.string.extra_build_name), bundle.getString(getString(R.string.extra_build_name)));
+                        mIntent.putExtra(getString(R.string.extra_build_status), bundle.getString(getString(R.string.extra_build_status)));
+                    }
+                    sendMessage(mIntent);
+                    super.onPostExecute(bundle);
+                }
+            }.execute(intent);
+
 		}
 		stopSelfCheck();
 		return retval;
@@ -99,7 +132,7 @@ public class BuildWatchExtensionService extends ExtensionService {
 			// Now, we know not many people have a Sony SmartWatch, so we are
 			// trying to bring at least some value to others trying to use this
 			// App and show a system notification.
-			notifyDevice(message, fullName, url, iBrokeTheBuild);
+			notifyDevice(intent);
 		}
 
 		// Track whether people actually use the smart watch or just device
@@ -169,13 +202,28 @@ public class BuildWatchExtensionService extends ExtensionService {
 	 * Shows a build notification as a native android notifcation on the device
 	 * for people without or with an unconnected SmartWatch..
 	 * 
-	 * @param message
-	 * @param fullname
-	 * @param url
-	 * @param iBrokeTheBuild
+	 * @param intent
 	 */
-	private void notifyDevice(String message, String fullname, String url,
-			boolean iBrokeTheBuild) {
+	private void notifyDevice(Intent intent) {
+
+        String message = intent
+                .getStringExtra(getString(R.string.extra_message));
+        boolean iBrokeTheBuild = intent.getBooleanExtra(
+                getString(R.string.extra_ifuckedup), false);
+        String fullName = intent
+                .getStringExtra(getString(R.string.extra_build_name));
+        String url = intent.getStringExtra(getString(R.string.extra_build_url));
+        String status = intent.getStringExtra(getString(R.string.extra_build_status));
+
+        int icon = R.drawable.jenkins_3;
+        if ("SUCCESS".equals(status)) {
+            icon = R.drawable.jenkins_1;
+        } else if ("UNSTABLE".equals(status)) {
+            icon = R.drawable.jenkins_2;
+        } else if ("FAILURE".equals(status)) {
+            icon = R.drawable.jenkins_4;
+        }
+
 		NotificationManager notificationManager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
 
 		Intent openInJenkins = new Intent(Intent.ACTION_VIEW);
@@ -189,20 +237,21 @@ public class BuildWatchExtensionService extends ExtensionService {
 
 		Builder builder = new NotificationCompat.Builder(
 				getApplicationContext())
-				.setSmallIcon(R.drawable.ic_buildwatch)
-				.setContentTitle(getString(R.string.new_message_from_jenkins))
+				.setSmallIcon(icon)
+				.setContentTitle(fullName)
 				.setWhen(System.currentTimeMillis())
 				.setAutoCancel(true)
-				.addAction(
+                .setContentText(message)
+				/*.addAction(
 						R.drawable.jenkins_30x30,
 						getString(R.string.open_in_jenkins),
 						PendingIntent.getActivity(this, 0, openInJenkins,
-								PendingIntent.FLAG_UPDATE_CURRENT))
-				.addAction(
+								PendingIntent.FLAG_UPDATE_CURRENT))*/
+				/*.addAction(
 						android.R.drawable.ic_menu_info_details,
 						getString(R.string.show_message),
 						PendingIntent.getActivity(this, 0, showMessage,
-								PendingIntent.FLAG_UPDATE_CURRENT));
+								PendingIntent.FLAG_UPDATE_CURRENT))*/;
 		// Configure the default event that happens when you click to
 		// notification according to the open_in_browser setting from the shared
 		// preferences.
@@ -220,7 +269,26 @@ public class BuildWatchExtensionService extends ExtensionService {
 		android.app.Notification notification = builder.build();
 		notificationManager.notify(4711, notification);
 
-	}
+        Intent watchIntent = new Intent("com.samsung.accessory.intent.action.ALERT_NOTIFICATION_ITEM");
+
+        watchIntent.putExtra("NOTIFICATION_PACKAGE_NAME", "com.crowflying.buildwatch");
+        watchIntent.putExtra("NOTIFICATION_VERSION", 3);
+        watchIntent.putExtra("NOTIFICATION_TIME", System.currentTimeMillis());
+        watchIntent.putExtra("NOTIFICATION_MAIN_TEXT", fullName + " is " + status);
+        watchIntent.putExtra("NOTIFICATION_TEXT_MESSAGE", message);
+        byte [] byteArray = convertResizeBitmapToByte(BitmapFactory.decodeResource(getResources(), icon));
+        watchIntent.putExtra("NOTIFICATION_APP_ICON", byteArray);
+        sendBroadcast(watchIntent);
+
+    }
+
+    public byte[] convertResizeBitmapToByte(Bitmap bitmap){
+        Bitmap scBitmap = Bitmap.createScaledBitmap(bitmap, 75, 75, false);
+        ByteArrayOutputStream byteArrayStream = new ByteArrayOutputStream();
+        scBitmap.compress(Bitmap.CompressFormat.PNG, 50, byteArrayStream);
+
+        return byteArrayStream.toByteArray();
+    }
 
 	@Override
 	protected void onViewEvent(Intent intent) {
